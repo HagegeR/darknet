@@ -126,6 +126,8 @@ __device__ float gradient_kernel(float x, ACTIVATION a)
         return loggy_gradient_kernel(x);
     case RELU:
         return relu_gradient_kernel(x);
+    case NORM_CHAN:
+        return relu_gradient_kernel(x);
     case ELU:
         return elu_gradient_kernel(x);
     case SELU:
@@ -397,6 +399,7 @@ extern "C" void gradient_array_ongpu(float *x, int n, ACTIVATION a, float *delta
     else if (a == TANH) gradient_array_tanh_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else if (a == HARDTAN) gradient_array_hardtan_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else if (a == RELU) gradient_array_relu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
+    else if (a == NORM_CHAN) gradient_array_relu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else if (a == SELU) gradient_array_selu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else
         gradient_array_kernel << <cuda_gridsize(n), BLOCK, 0, get_cuda_stream() >> > (x, n, a, delta);
@@ -415,5 +418,42 @@ extern "C" void gradient_array_mish_ongpu(int n, float *activation_input_gpu, fl
 {
     const int num_blocks = get_number_of_blocks(n, BLOCK);
     gradient_array_mish_kernel << <cuda_gridsize(n), BLOCK, 0, get_cuda_stream() >> > (n, activation_input_gpu, delta);
+    CHECK_CUDA(cudaPeekAtLastError());
+}
+
+
+__global__ void activate_array_normalize_channels_kernel(float *x, int size, int batch, int channels, int wh_step, float *output_gpu)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int wh_i = i % wh_step;
+    int b = i / wh_step;
+
+    const float eps = 0.0001;
+    if (i < size) {
+        float sum = eps;
+        int k;
+        for (k = 0; k < channels; ++k) {
+            float val = x[wh_i + k * wh_step + b*wh_step*channels];
+            if (val > 0) sum += val;
+        }
+        for (k = 0; k < channels; ++k) {
+            float val = x[wh_i + k * wh_step + b*wh_step*channels];
+            if (val > 0) val = val / sum;
+            else val = 0;
+            output_gpu[wh_i + k * wh_step + b*wh_step*channels] = val;
+        }
+    }
+}
+
+extern "C" void activate_array_normalize_channels_ongpu(float *x, int n, int batch, int channels, int wh_step, float *output_gpu)
+{
+    // n = w*h*c*batch
+    // size = w*h*batch
+    int size = n / channels;
+
+    const int num_blocks = get_number_of_blocks(size, BLOCK);
+
+    activate_array_normalize_channels_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> > (x, size, batch, channels, wh_step, output_gpu);
     CHECK_CUDA(cudaPeekAtLastError());
 }

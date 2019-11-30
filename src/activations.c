@@ -47,6 +47,7 @@ ACTIVATION get_activation(char *s)
     if (strcmp(s, "logistic")==0) return LOGISTIC;
     if (strcmp(s, "swish") == 0) return SWISH;
     if (strcmp(s, "mish") == 0) return MISH;
+    if (strcmp(s, "normalize_channels") == 0) return NORM_CHAN;
     if (strcmp(s, "loggy")==0) return LOGGY;
     if (strcmp(s, "relu")==0) return RELU;
     if (strcmp(s, "elu")==0) return ELU;
@@ -147,6 +148,34 @@ void activate_array_mish(float *x, const int n, float * activation_input, float 
     }
 }
 
+void activate_array_normalize_channels(float *x, const int n, int batch, int channels, int wh_step, float *output)
+{
+    int size = n / channels;
+
+    int i;
+    #pragma omp parallel for
+    for (i = 0; i < size; ++i) {
+        int wh_i = i % wh_step;
+        int b = i / wh_step;
+
+        const float eps = 0.0001;
+        if (i < size) {
+            float sum = eps;
+            int k;
+            for (k = 0; k < channels; ++k) {
+                float val = x[wh_i + k * wh_step + b*wh_step*channels];
+                if (val > 0) sum += val;
+            }
+            for (k = 0; k < channels; ++k) {
+                float val = x[wh_i + k * wh_step + b*wh_step*channels];
+                if (val > 0) val = val / sum;
+                else val = 0;
+                output[wh_i + k * wh_step + b*wh_step*channels] = val;
+            }
+        }
+    }
+}
+
 float gradient(float x, ACTIVATION a)
 {
     switch(a){
@@ -157,6 +186,8 @@ float gradient(float x, ACTIVATION a)
         case LOGGY:
             return loggy_gradient(x);
         case RELU:
+            return relu_gradient(x);
+        case NORM_CHAN:
             return relu_gradient(x);
         case ELU:
             return elu_gradient(x);

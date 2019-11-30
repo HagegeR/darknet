@@ -55,6 +55,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
                 name_list, names_size, net_classes, cfgfile);
             if (net_classes > names_size) getchar();
         }
+        free_ptrs((void**)names, net_map.layers[net_map.n - 1].classes);
     }
 
     srand(time(0));
@@ -1455,6 +1456,7 @@ void run_detector(int argc, char **argv)
     int show_imgs = find_arg(argc, argv, "-show_imgs");
     int mjpeg_port = find_int_arg(argc, argv, "-mjpeg_port", -1);
     int json_port = find_int_arg(argc, argv, "-json_port", -1);
+    int time_limit_sec = find_int_arg(argc, argv, "-time_limit_sec", 0);
     char *out_filename = find_char_arg(argc, argv, "-out_filename", 0);
     char *outfile = find_char_arg(argc, argv, "-out", 0);
     char *prefix = find_char_arg(argc, argv, "-prefix", 0);
@@ -1522,7 +1524,7 @@ void run_detector(int argc, char **argv)
             if (strlen(filename) > 0)
                 if (filename[strlen(filename) - 1] == 0x0d) filename[strlen(filename) - 1] = 0;
         demo(cfg, weights, thresh, hier_thresh, cam_index, filename, names, classes, frame_skip, prefix, out_filename,
-            mjpeg_port, json_port, dont_show, ext_output, letter_box);
+            mjpeg_port, json_port, dont_show, ext_output, letter_box, time_limit_sec);
 
         free_list_contents_kvp(options);
         free_list(options);

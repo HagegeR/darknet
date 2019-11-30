@@ -102,7 +102,7 @@ typedef struct tree {
 
 // activations.h
 typedef enum {
-    LOGISTIC, RELU, RELIE, LINEAR, RAMP, TANH, PLSE, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, SWISH, MISH
+    LOGISTIC, RELU, RELIE, LINEAR, RAMP, TANH, PLSE, LEAKY, ELU, LOGGY, STAIR, HARDTAN, LHTAN, SELU, SWISH, MISH, NORM_CHAN
 }ACTIVATION;
 
 // parser.h
@@ -235,10 +235,13 @@ struct layer {
     int sqrt;
     int flip;
     int index;
+    int scale_wh;
     int binary;
     int xnor;
     int peephole;
     int use_bin_output;
+    int keep_delta_gpu;
+    int optimized_memory;
     int steps;
     int state_constrain;
     int hidden;
@@ -677,7 +680,13 @@ typedef struct network {
     size_t *max_input16_size;
     size_t *max_output16_size;
     int wait_stream;
+
+    float *global_delta_gpu;
+    float *state_delta_gpu;
+    size_t max_delta_gpu_size;
 #endif
+    int optimized_memory;
+    size_t workspace_size_limit;
 } network;
 
 // network.h
@@ -920,6 +929,9 @@ double get_time();
 void stop_timer_and_show();
 void stop_timer_and_show_name(char *name);
 void show_total_time();
+
+// gemm.h
+LIB_API void init_cpu();
 
 #ifdef __cplusplus
 }
