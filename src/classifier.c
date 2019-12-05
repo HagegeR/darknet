@@ -84,6 +84,7 @@ void train_classifier(char *datacfg, char *cfgfile, char *weightfile, int *gpus,
     args.min = net.min_crop;
     args.max = net.max_crop;
     args.flip = net.flip;
+    args.blur = net.blur;
     args.angle = net.angle;
     args.aspect = net.aspect;
     args.exposure = net.exposure;
@@ -213,6 +214,9 @@ void train_classifier(char *datacfg, char *cfgfile, char *weightfile, int *gpus,
     free_ptrs((void**)paths, plist->size);
     free_list(plist);
     free(base);
+
+    free_list_contents_kvp(options);
+    free_list(options);
 }
 
 
@@ -778,6 +782,7 @@ void predict_classifier(char *datacfg, char *cfgfile, char *weightfile, char *fi
     char *name_list = option_find_str(options, "names", 0);
     if(!name_list) name_list = option_find_str(options, "labels", "data/labels.list");
     int classes = option_find_int(options, "classes", 2);
+    printf(" classes = %d, output in cfg = %d \n", classes, net.layers[net.n - 1].c);
     if (top == 0) top = option_find_int(options, "top", 1);
     if (top > classes) top = classes;
 
@@ -821,8 +826,13 @@ void predict_classifier(char *datacfg, char *cfgfile, char *weightfile, char *fi
         }
         if(r.data != im.data) free_image(r);
         free_image(im);
+        free_image(resized);
         if (filename) break;
     }
+    free(indexes);
+    free_network(net);
+    free_list_contents_kvp(options);
+    free_list(options);
 }
 
 

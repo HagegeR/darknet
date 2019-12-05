@@ -95,17 +95,15 @@ extern "C" {
 
 mat_cv *load_image_mat_cv(const char *filename, int flag)
 {
+    cv::Mat *mat_ptr = NULL;
     try {
-        cv::Mat *mat_ptr = new cv::Mat();
-        cv::Mat &mat = *mat_ptr;
-        mat = cv::imread(filename, flag);
+        cv::Mat mat = cv::imread(filename, flag);
         if (mat.empty())
         {
-            delete mat_ptr;
             std::string shrinked_filename = filename;
             if (shrinked_filename.length() > 1024) {
-                shrinked_filename += "name is too long: ";
                 shrinked_filename.resize(1024);
+                shrinked_filename = std::string("name is too long: ") + shrinked_filename;
             }
             cerr << "Cannot load image " << shrinked_filename << std::endl;
             std::ofstream bad_list("bad.list", std::ios::out | std::ios::app);
@@ -113,14 +111,19 @@ mat_cv *load_image_mat_cv(const char *filename, int flag)
             //if (check_mistakes) getchar();
             return NULL;
         }
-        if (mat.channels() == 3) cv::cvtColor(mat, mat, cv::COLOR_RGB2BGR);
-        else if (mat.channels() == 4) cv::cvtColor(mat, mat, cv::COLOR_RGBA2BGRA);
+        cv::Mat dst;
+        if (mat.channels() == 3) cv::cvtColor(mat, dst, cv::COLOR_RGB2BGR);
+        else if (mat.channels() == 4) cv::cvtColor(mat, dst, cv::COLOR_RGBA2BGRA);
+        else dst = mat;
+
+        mat_ptr = new cv::Mat(dst);
 
         return (mat_cv *)mat_ptr;
     }
     catch (...) {
         cerr << "OpenCV exception: load_image_mat_cv \n";
     }
+    if (mat_ptr) delete mat_ptr;
     return NULL;
 }
 // ----------------------------------------
@@ -1236,6 +1239,10 @@ image image_data_augmentation(mat_cv* mat, int w, int h,
             dst.copyTo(sized);
         }
 
+        //char txt[100];
+        //sprintf(txt, "blur = %d", blur);
+        //cv::putText(sized, txt, cv::Point(100, 100), cv::FONT_HERSHEY_COMPLEX_SMALL, 1.7, CV_RGB(255, 0, 0), 1, CV_AA);
+
         // Mat -> image
         out = mat_to_image(sized);
     }
@@ -1252,6 +1259,16 @@ void blend_images_cv(image new_img, float alpha, image old_img, float beta)
     cv::Mat new_mat(cv::Size(new_img.w, new_img.h), CV_32FC(new_img.c), new_img.data);// , size_t step = AUTO_STEP)
     cv::Mat old_mat(cv::Size(old_img.w, old_img.h), CV_32FC(old_img.c), old_img.data);
     cv::addWeighted(new_mat, alpha, old_mat, beta, 0.0, new_mat);
+}
+
+// bilateralFilter bluring
+image blur_image(image src_img, int ksize)
+{
+    cv::Mat src = image_to_mat(src_img);
+    cv::Mat dst;
+    cv::bilateralFilter(src, dst, ksize, 75, 75);
+    image dst_img = mat_to_image(dst);
+    return dst_img;
 }
 
 // ====================================================================
