@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <cublas_v2.h>
+#include <float.h>
 
 #include "activations.h"
 #include "dark_cuda.h"
@@ -399,7 +400,11 @@ extern "C" void gradient_array_ongpu(float *x, int n, ACTIVATION a, float *delta
     else if (a == TANH) gradient_array_tanh_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else if (a == HARDTAN) gradient_array_hardtan_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else if (a == RELU) gradient_array_relu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
-    else if (a == NORM_CHAN) gradient_array_relu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
+    //else if (a == NORM_CHAN) gradient_array_relu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
+    else if (a == NORM_CHAN_SOFTMAX || a == NORM_CHAN) {
+        printf(" Error: should be used custom NORM_CHAN_SOFTMAX-function for gradient \n");
+        exit(0);
+    }
     else if (a == SELU) gradient_array_selu_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> >(x, n, delta);
     else
         gradient_array_kernel << <cuda_gridsize(n), BLOCK, 0, get_cuda_stream() >> > (x, n, a, delta);
@@ -455,5 +460,137 @@ extern "C" void activate_array_normalize_channels_ongpu(float *x, int n, int bat
     const int num_blocks = get_number_of_blocks(size, BLOCK);
 
     activate_array_normalize_channels_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> > (x, size, batch, channels, wh_step, output_gpu);
+    CHECK_CUDA(cudaPeekAtLastError());
+}
+
+
+
+__global__ void activate_array_normalize_channels_softmax_kernel(float *x, int size, int batch, int channels, int wh_step, float *output_gpu, int use_max_val)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int wh_i = i % wh_step;
+    int b = i / wh_step;
+
+    const float eps = 0.0001;
+    if (i < size) {
+        float sum = eps;
+        float max_val = -FLT_MAX;
+        int k;
+        if (use_max_val) {
+            for (k = 0; k < channels; ++k) {
+                float val = x[wh_i + k * wh_step + b*wh_step*channels];
+                if (val > max_val || k == 0) max_val = val;
+            }
+        }
+        else
+            max_val = 0;
+
+        for (k = 0; k < channels; ++k) {
+            float val = x[wh_i + k * wh_step + b*wh_step*channels];
+            sum += expf(val - max_val);
+        }
+        for (k = 0; k < channels; ++k) {
+            float val = x[wh_i + k * wh_step + b*wh_step*channels];
+            val = expf(val - max_val) / sum;
+            output_gpu[wh_i + k * wh_step + b*wh_step*channels] = val;
+        }
+    }
+}
+
+extern "C" void activate_array_normalize_channels_softmax_ongpu(float *x, int n, int batch, int channels, int wh_step, float *output_gpu, int use_max_val)
+{
+    // n = w*h*c*batch
+    // size = w*h*batch
+    int size = n / channels;
+
+    const int num_blocks = get_number_of_blocks(size, BLOCK);
+
+    activate_array_normalize_channels_softmax_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> > (x, size, batch, channels, wh_step, output_gpu, use_max_val);
+    CHECK_CUDA(cudaPeekAtLastError());
+}
+
+
+
+__global__ void gradient_array_normalize_channels_softmax_kernel(float *x, int size, int batch, int channels, int wh_step, float *delta_gpu)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int wh_i = i % wh_step;
+    int b = i / wh_step;
+
+    if (i < size) {
+        int k;
+        /*
+        float grad = 0;
+        for (k = 0; k < channels; ++k) {
+            const int index = wh_i + k * wh_step + b*wh_step*channels;
+            float out = x[index];
+            float delta = delta_gpu[index];
+            grad += out*fabs(delta);
+        }
+        */
+        for (k = 0; k < channels; ++k) {
+            const int index = wh_i + k * wh_step + b*wh_step*channels;
+            float delta = delta_gpu[index];
+            float grad = x[index] * (1 - x[index]);
+            delta = delta * grad;
+            delta_gpu[index] = delta;
+        }
+    }
+}
+
+extern "C" void gradient_array_normalize_channels_softmax_ongpu(float *output_gpu, int n, int batch, int channels, int wh_step, float *delta_gpu)
+{
+    // n = w*h*c*batch
+    // size = w*h*batch
+    int size = n / channels;
+
+    const int num_blocks = get_number_of_blocks(size, BLOCK);
+
+    gradient_array_normalize_channels_softmax_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> > (output_gpu, size, batch, channels, wh_step, delta_gpu);
+    CHECK_CUDA(cudaPeekAtLastError());
+}
+
+
+__global__ void gradient_array_normalize_channels_kernel(float *x, int size, int batch, int channels, int wh_step, float *delta_gpu)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int wh_i = i % wh_step;
+    int b = i / wh_step;
+
+    if (i < size) {
+        int k;
+        /*
+        float grad = 0;
+        for (k = 0; k < channels; ++k) {
+            const int index = wh_i + k * wh_step + b*wh_step*channels;
+            float out = x[index];
+            float delta = delta_gpu[index];
+            grad += out*fabs(delta);
+        }
+        */
+        for (k = 0; k < channels; ++k) {
+            const int index = wh_i + k * wh_step + b*wh_step*channels;
+            if (x[index] > 0) {
+                float delta = delta_gpu[index];
+                float grad = x[index];
+                delta = delta * grad;
+                delta_gpu[index] = delta;
+            }
+        }
+    }
+}
+
+extern "C" void gradient_array_normalize_channels_ongpu(float *output_gpu, int n, int batch, int channels, int wh_step, float *delta_gpu)
+{
+    // n = w*h*c*batch
+    // size = w*h*batch
+    int size = n / channels;
+
+    const int num_blocks = get_number_of_blocks(size, BLOCK);
+
+    gradient_array_normalize_channels_kernel << <num_blocks, BLOCK, 0, get_cuda_stream() >> > (output_gpu, size, batch, channels, wh_step, delta_gpu);
     CHECK_CUDA(cudaPeekAtLastError());
 }

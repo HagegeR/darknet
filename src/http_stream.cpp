@@ -258,10 +258,11 @@ public:
                 //_write(s, head, 0);
                 if (!close_all_sockets) _write(s, ", \n", 0);
                 int n = _write(s, outputbuf, outlen);
-                if (n < outlen)
+                if (n < (int)outlen)
                 {
                     cerr << "JSON_sender: kill client " << s << endl;
-                    ::shutdown(s, 2);
+                    close_socket(s);
+                    //::shutdown(s, 2);
                     FD_CLR(s, &master);
                 }
 
@@ -448,7 +449,7 @@ public:
         cv::imencode(".jpg", frame, outbuf, params);  //REMOVED FOR COMPATIBILITY
         // https://docs.opencv.org/3.4/d4/da8/group__imgcodecs.html#ga292d81be8d76901bff7988d18d2b42ac
         //std::cerr << "cv::imencode call disabled!" << std::endl;
-        size_t outlen = outbuf.size();
+        int outlen = static_cast<int>(outbuf.size());
 
 #ifdef _WIN32
         for (unsigned i = 0; i<rread.fd_count; i++)
@@ -504,11 +505,12 @@ public:
                 sprintf(head, "--mjpegstream\r\nContent-Type: image/jpeg\r\nContent-Length: %zu\r\n\r\n", outlen);
                 _write(s, head, 0);
                 int n = _write(s, (char*)(&outbuf[0]), outlen);
-                //cerr << "known client " << s << " " << n << endl;
-                if (n < outlen)
+                cerr << "known client: " << s << ", sent = " << n << ", must be sent outlen = " << outlen << endl;
+                if (n < (int)outlen)
                 {
                     cerr << "MJPG_sender: kill client " << s << endl;
-                    ::shutdown(s, 2);
+                    //::shutdown(s, 2);
+                    close_socket(s);
                     FD_CLR(s, &master);
                 }
             }
@@ -524,7 +526,7 @@ public:
 
 static std::mutex mtx_mjpeg;
 
-struct mat_cv : cv::Mat { int a[0]; };
+//struct mat_cv : cv::Mat { int a[0]; };
 
 void send_mjpeg(mat_cv* mat, int port, int timeout, int quality)
 {
@@ -532,7 +534,7 @@ void send_mjpeg(mat_cv* mat, int port, int timeout, int quality)
         std::lock_guard<std::mutex> lock(mtx_mjpeg);
         static MJPG_sender wri(port, timeout, quality);
         //cv::Mat mat = cv::cvarrToMat(ipl);
-        wri.write(*mat);
+        wri.write(*(cv::Mat*)mat);
         std::cout << " MJPEG-stream sent. \n";
     }
     catch (...) {
@@ -544,6 +546,8 @@ void send_mjpeg(mat_cv* mat, int port, int timeout, int quality)
 std::string get_system_frame_time_string()
 {
     std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> lock(mtx);
     struct tm *tmp_buf = localtime(&t);
     char buff[256];
     std::strftime(buff, 256, "%A %F %T", tmp_buf);
@@ -554,7 +558,7 @@ std::string get_system_frame_time_string()
 
 
 #ifdef __CYGWIN__
-int send_http_post_request(char *http_post_host, int server_port, char *videosource,
+int send_http_post_request(char *http_post_host, int server_port, const char *videosource,
     detection *dets, int nboxes, int classes, char **names, long long int frame_id, int ext_output, int timeout)
 {
     std::cerr << " send_http_post_request() isn't implemented \n";
@@ -576,7 +580,7 @@ int send_http_post_request(char *http_post_host, int server_port, char *videosou
 // https://webhook.site/
 // https://github.com/yhirose/cpp-httplib
 // sent POST http request
-int send_http_post_request(char *http_post_host, int server_port, char *videosource,
+int send_http_post_request(char *http_post_host, int server_port, const char *videosource,
     detection *dets, int nboxes, int classes, char **names, long long int frame_id, int ext_output, int timeout)
 {
     const float thresh = 0.005; // function get_network_boxes() has already filtred dets by actual threshold
